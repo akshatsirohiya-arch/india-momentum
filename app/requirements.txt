@@ -3,3 +3,6 @@ pandas
 yfinance
 google-genai
 numpy
+streamlit
+pandas
+google-genai>=1.0.0
