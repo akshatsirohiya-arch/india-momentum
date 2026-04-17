@@ -6,10 +6,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Explicitly grant write access
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    permissions:
-      contents: write # CRITICAL: Gives the bot permission to save the CSV
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -19,16 +19,15 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
-        run: pip install yfinance pandas numpy requests
-
       - name: Run Scanner
-        run: python generate_watchlist.py
+        run: |
+          pip install yfinance pandas numpy requests
+          python generate_watchlist.py
 
-      - name: Commit and Push CSV
+      - name: Commit and Push
         run: |
           git config --global user.name "MarketBot"
           git config --global user.email "bot@nse.com"
           git add daily_watchlist.csv
-          git commit -m "Update Watchlist $(date)" || echo "No changes"
+          git commit -m "Update NSE Watchlist $(date)" || echo "No changes"
           git push
