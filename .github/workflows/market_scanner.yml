@@ -1,23 +1,28 @@
 name: Full India Market Scan
 on:
   schedule:
-    - cron: '0 13 * * *' # 6:30 PM IST
+    - cron: '0 13 * * *'
   workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Scan
+      - name: Install Dependencies
+        # Added --retries and --no-cache-dir to prevent SSL corruption
         run: |
-          pip install yfinance pandas numpy requests
-          python generate_watchlist.py
+          python -m pip install --upgrade pip
+          pip install --retries 10 --no-cache-dir yfinance pandas numpy requests
+      - name: Scan
+        run: python generate_watchlist.py
       - name: Push
         run: |
           git config --global user.name "MarketBot"
