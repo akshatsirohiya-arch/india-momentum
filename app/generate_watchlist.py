@@ -1,17 +1,22 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import io
 import requests
 
-def get_nifty_500_tickers():
-    """Fetches the latest Nifty 500 list from NSE."""
-    url = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
-    df = pd.read_csv(url)
-    # Convert 'SYMBOL' to 'SYMBOL.NS' for yfinance
+# --- CONFIGURATION ---
+MARKET_CAP_FILTER = 500 * 1e7  # Example: 500 Crore minimum (INR)
+
+def get_full_nse_universe():
+    """Fetches every listed stock on the NSE using the official Bhavcopy data."""
+    url = "https://archives.nseindia.com/content/indices/ind_niftytotalmarketlist.csv"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    response = requests.get(url, headers=headers)
+    df = pd.read_csv(io.StringIO(response.text))
+    # Returns all tickers with the .NS suffix
     return [f"{s}.NS" for s in df['Symbol'].tolist()]
 
 def calculate_slope(prices):
-    """Calculates momentum slope using log-linear regression."""
     if len(prices) < 30: return 0
     y = np.log(prices)
     x = np.arange(len(y))
@@ -19,23 +24,27 @@ def calculate_slope(prices):
     return slope
 
 def generate():
-    tickers = get_nifty_500_tickers()
-    print(f"Scanning {len(tickers)} stocks...")
+    tickers = get_full_nse_universe()
+    print(f"Scanning entire NSE market: {len(tickers)} symbols...")
     
-    # Batch download last 90 days for all stocks (High Speed)
+    # BATCH DOWNLOAD: Fetching last 90 days for ALL stocks at once
     data = yf.download(tickers, period="90d", interval="1d", group_by='ticker', progress=False)
     
     results = []
     for t in tickers:
         try:
-            # Extract 'Close' and 'Volume' for this specific ticker
             s_data = data[t].dropna()
-            if len(s_data) < 30: continue
+            if len(s_data) < 40: continue # Ensure enough history
             
+            # 1. Momentum Logic
             price = s_data['Close'].iloc[-1]
             slope = calculate_slope(s_data['Close'])
-            # Relative Volume (last day vs 20-day avg)
+            
+            # 2. RVOL (Relative Volume)
             rvol = s_data['Volume'].iloc[-1] / s_data['Volume'].tail(20).mean()
+            
+            # 3. Market Cap Filtering (Optional)
+            # info = yf.Ticker(t).info # Slow! Better to filter by Nifty Total Market indices
             
             results.append({
                 "Ticker": t.replace(".NS", ""),
@@ -47,7 +56,7 @@ def generate():
     
     df = pd.DataFrame(results)
     df.to_csv("daily_watchlist.csv", index=False)
-    print(f"Watchlist generated: {len(df)} stocks processed.")
+    print(f"Success! {len(df)} stocks written to daily_watchlist.csv")
 
 if __name__ == "__main__":
     generate()
