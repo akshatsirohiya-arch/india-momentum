@@ -1,59 +1,69 @@
 import streamlit as st
 import pandas as pd
 import os
+import time
 from google import genai
 
-st.set_page_config(layout="wide", page_title="India Institutional Hunter")
+# ... (Configuration and CSS) ...
 
-# Initialization
+# Safe Client Initialization
 try:
+    # We use the key from st.secrets
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
-except:
-    st.error("API Key Missing in Secrets.")
+except Exception as e:
+    st.error(f"Initialization Error: {e}")
     st.stop()
 
 def get_ai_recommendations(df):
-    """Sends the entire filtered batch to AI for a 'Top Picks' analysis."""
+    """Sends the filtered batch to AI for a Top 20 analysis."""
     
-    # Sort by Slope and take top 25 to keep within token limits
-    top_candidates = df.sort_values(by="Slope", ascending=False).head(25)
+    # Sort by Slope and take enough to let the AI choose the best 20
+    # We take top 40 so the AI has a pool to filter from
+    candidates = df.sort_values(by="Slope", ascending=False).head(40)
     
-    # Convert to a compact string for the AI
-    stock_list_str = top_candidates[['Ticker', 'Price', 'Slope', 'RVOL']].to_string(index=False)
+    # Convert to string
+    stock_list_str = candidates[['Ticker', 'Price', 'Slope', 'RVOL']].to_string(index=False)
     
     prompt = (
-        "You are an institutional fund manager. Here is a list of NSE stocks with "
+        "You are an expert Institutional Trader specializing in the Indian Market (NSE). "
+        "I am providing you with a list of stocks that have passed a technical filter for "
         "confirmed Higher-High/Higher-Low structures and high momentum slopes.\n\n"
         f"{stock_list_str}\n\n"
-        "Task: Identify the TOP 3 stocks for a 'Position Trade'. "
-        "Base your decision on the balance between high Slope and RVOL (Relative Volume). "
-        "Provide a concise reasoning for each pick in 2 sentences."
+        "TASK:\n"
+        "1. Identify the TOP 20 'High-Conviction' buys from this list.\n"
+        "2. Rank them 1 to 20 based on the 'Quality of Trend' (High Slope + Healthy RVOL between 1.0 and 3.0).\n"
+        "3. For each of the top 5, provide a 1-sentence technical justification.\n"
+        "4. Format the output as a clean numbered list."
     )
     
     try:
-        # Use 1.5-Flash for higher batch-processing quotas
+        # UPDATED MODEL STRING: Using the full identifier 'gemini-1.5-flash'
+        # Some SDK versions prefer just the name, others the full path. 
+        # 'gemini-1.5-flash' is the standard for the genai SDK.
         response = client.models.generate_content(
             model="gemini-1.5-flash", 
             contents=prompt
         )
         return response.text
     except Exception as e:
+        # If it still fails, try the 1.5-flash-8b (lighter version)
         return f"AI Analysis Error: {str(e)}"
 
 # UI Logic
 if os.path.exists("daily_watchlist.csv"):
     df = pd.read_csv("daily_watchlist.csv")
     
-    st.title("🏹 India Full-Market Momentum")
+    st.title("🏹 India Institutional Momentum")
     
-    if st.button("🤖 Run AI Batch Analysis (Pick Top 3)"):
-        with st.spinner("Analyzing the entire watchlist..."):
-            recommendations = get_ai_recommendations(df)
-            st.success("### Institutional Top Picks")
-            st.markdown(recommendations)
+    if st.button("🤖 Run AI Deep-Dive (Top 20 Buys)"):
+        if len(df) < 5:
+            st.warning("Watchlist too small for a Top 20 analysis. Run the scan first.")
+        else:
+            with st.spinner("Analyzing market structure for the Top 20..."):
+                recommendations = get_ai_recommendations(df)
+                st.markdown("### 🏆 Institutional Top 20 Recommendations")
+                st.write(recommendations)
 
     st.markdown("---")
-    st.subheader("Full Momentum Watchlist")
-    st.dataframe(df.sort_values(by="Slope", ascending=False), use_container_width=True)
-else:
-    st.warning("Please run the GitHub Action to generate the watchlist first.")
+    st.subheader("Raw Scan Results")
+    st.dataframe(df, use_container_width=True)
