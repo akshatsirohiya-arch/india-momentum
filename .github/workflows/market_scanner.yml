@@ -6,9 +6,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Add this environment variable to tell GitHub you're ready for Node 24
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true 
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    permissions:
+      contents: write # CRITICAL: Gives the bot permission to save the CSV
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -24,11 +25,10 @@ jobs:
       - name: Run Scanner
         run: python generate_watchlist.py
 
-      - name: Commit Data
+      - name: Commit and Push CSV
         run: |
           git config --global user.name "MarketBot"
           git config --global user.email "bot@nse.com"
           git add daily_watchlist.csv
-          # The '|| echo' allows the action to finish even if no stocks changed price
-          git commit -m "Full NSE Update $(date)" || echo "No changes to commit"
+          git commit -m "Update Watchlist $(date)" || echo "No changes"
           git push
