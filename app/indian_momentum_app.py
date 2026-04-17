@@ -5,27 +5,55 @@ from google import genai
 
 st.set_page_config(layout="wide", page_title="India Institutional Hunter")
 
-# AI Setup
-client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+# Initialization
+try:
+    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+except:
+    st.error("API Key Missing in Secrets.")
+    st.stop()
 
+def get_ai_recommendations(df):
+    """Sends the entire filtered batch to AI for a 'Top Picks' analysis."""
+    
+    # Sort by Slope and take top 25 to keep within token limits
+    top_candidates = df.sort_values(by="Slope", ascending=False).head(25)
+    
+    # Convert to a compact string for the AI
+    stock_list_str = top_candidates[['Ticker', 'Price', 'Slope', 'RVOL']].to_string(index=False)
+    
+    prompt = (
+        "You are an institutional fund manager. Here is a list of NSE stocks with "
+        "confirmed Higher-High/Higher-Low structures and high momentum slopes.\n\n"
+        f"{stock_list_str}\n\n"
+        "Task: Identify the TOP 3 stocks for a 'Position Trade'. "
+        "Base your decision on the balance between high Slope and RVOL (Relative Volume). "
+        "Provide a concise reasoning for each pick in 2 sentences."
+    )
+    
+    try:
+        # Use 1.5-Flash for higher batch-processing quotas
+        response = client.models.generate_content(
+            model="gemini-1.5-flash", 
+            contents=prompt
+        )
+        return response.text
+    except Exception as e:
+        return f"AI Analysis Error: {str(e)}"
+
+# UI Logic
 if os.path.exists("daily_watchlist.csv"):
     df = pd.read_csv("daily_watchlist.csv")
     
-    # Exact Momentum Metric: Annualized Log Velocity
-    df['Velocity %'] = (df['Slope'] * 252) * 100
-    df = df.sort_values(by="Velocity %", ascending=False)
-
-    st.title("🏹 Full India Market AI Hunter")
+    st.title("🏹 India Full-Market Momentum")
     
-    # Summary of Top Breakouts
-    if st.button("🚀 Institutional AI Summary"):
-        top_context = df.head(20).to_csv(index=False)
-        prompt = f"Analyze these top Indian market velocity leaders: {top_context}. Identify 3 candidates with high probability of institutional accumulation."
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-        st.markdown(response.text)
+    if st.button("🤖 Run AI Batch Analysis (Pick Top 3)"):
+        with st.spinner("Analyzing the entire watchlist..."):
+            recommendations = get_ai_recommendations(df)
+            st.success("### Institutional Top Picks")
+            st.markdown(recommendations)
 
     st.markdown("---")
-    st.header("📊 Full NSE Watchlist")
-    st.dataframe(df, use_container_width=True)
+    st.subheader("Full Momentum Watchlist")
+    st.dataframe(df.sort_values(by="Slope", ascending=False), use_container_width=True)
 else:
-    st.error("Market scan file not found. Trigger the GitHub Action to generate it.")
+    st.warning("Please run the GitHub Action to generate the watchlist first.")
