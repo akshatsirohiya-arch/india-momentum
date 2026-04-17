@@ -1,17 +1,27 @@
 name: Full India Market Scan
 on:
   schedule:
-    - cron: '30 13 * * *' # Runs 7 PM IST daily (Post-market)
+    - cron: '30 13 * * *' # Runs 7 PM IST daily
   workflow_dispatch:      # Allows manual trigger
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Opting into the new standard now
     steps:
-      - uses: actions/checkout@v3
-      - name: Setup
-        run: pip install yfinance pandas numpy requests
-      - name: Scan All Stocks
-        run: python generate_watchlist.py
+      - name: Checkout Code
+        uses: actions/checkout@v4 # Updated from v3 to v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5 # Updated from v4 to v5
+        with:
+          python-version: '3.10'
+
+      - name: Install & Run
+        run: |
+          pip install yfinance pandas numpy requests
+          python generate_watchlist.py
+
       - name: Commit Data
         run: |
           git config --global user.name "MarketBot"
@@ -19,4 +29,3 @@ jobs:
           git add daily_watchlist.csv
           git commit -m "Full NSE Update $(date)"
           git push
-
