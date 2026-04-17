@@ -3,78 +3,68 @@ import pandas as pd
 import numpy as np
 import io
 import requests
-import time
 
-def get_full_nse_universe():
-    """Fetches the Nifty Total Market list (covers 750+ stocks) with browser headers."""
-    # This URL covers Large, Mid, Small, and Microcap segments
-    url = "https://archives.nseindia.com/content/indices/ind_niftytotalmarketlist.csv"
+def get_nse_tickers():
+    """Fetches tickers from NSE with a fallback to a GitHub backup if blocked."""
+    urls = [
+        "https://archives.nseindia.com/content/indices/ind_niftytotalmarketlist.csv",
+        "https://raw.githubusercontent.com/datasets/nse-stocks/master/data/nifty500.csv" # Backup
+    ]
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/csv'
-    }
-
-    try:
-        # Create a session to handle cookies/headers like a real user
-        session = requests.Session()
-        session.get("https://www.nseindia.com", headers=headers, timeout=10) # Hit home page first to get cookies
-        response = session.get(url, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            df = pd.read_csv(io.StringIO(response.text))
-            df.columns = df.columns.str.strip()
-            tickers = [f"{s}.NS" for s in df['Symbol'].dropna().unique().tolist()]
-            print(f"✅ Successfully loaded {len(tickers)} stocks from NSE.")
-            return tickers
-        else:
-            print(f"⚠️ NSE returned status {response.status_code}. Using fallback.")
-    except Exception as e:
-        print(f"❌ Error fetching universe: {e}")
-
-    # ULTIMATE FALLBACK: Core Momentum Stocks (If NSE Website is down)
-    return ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "ITC.NS", "SBIN.NS", "BHARTIARTL.NS", "ADANIENT.NS", "TITAN.NS"]
-
-def calculate_slope(prices):
-    if len(prices) < 30: return 0
-    y = np.log(prices)
-    x = np.arange(len(y))
-    slope, _ = np.polyfit(x, y, 1)
-    return slope
+    for url in urls:
+        try:
+            print(f"Attempting to fetch tickers from: {url}")
+            resp = requests.get(url, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                df = pd.read_csv(io.StringIO(resp.text))
+                # Handle different column names between NSE and Backup
+                col = 'Symbol' if 'Symbol' in df.columns else 'symbol'
+                tickers = [f"{s}.NS" for s in df[col].dropna().unique().tolist()]
+                if len(tickers) > 10:
+                    print(f"✅ Success: Found {len(tickers)} tickers.")
+                    return tickers
+        except Exception as e:
+            print(f"Skipping source due to error: {e}")
+            continue
+    
+    # Emergency hardcoded list if all else fails
+    return ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "SBIN.NS", "ICICIBANK.NS"]
 
 def generate():
-    tickers = get_full_nse_universe()
-    print("Starting data fetch from Yahoo Finance...")
+    tickers = get_nse_tickers()
+    # Batch download last 60 days of data
+    print("Downloading market data from Yahoo Finance...")
+    data = yf.download(tickers, period="60d", interval="1d", group_by='ticker', progress=False)
     
-    # Batch download (Vectorized) is much faster for 'entire market' scans
-    data = yf.download(tickers, period="90d", interval="1d", group_by='ticker', progress=False)
-    
-    results = []
+    final_data = []
     for t in tickers:
         try:
-            # Handle yfinance multi-index format
-            s_data = data[t].dropna()
-            if len(s_data) < 35: continue
+            s = data[t].dropna()
+            if len(s) < 20: continue
             
-            price = s_data['Close'].iloc[-1]
-            slope = calculate_slope(s_data['Close'])
-            rvol = s_data['Volume'].iloc[-1] / s_data['Volume'].tail(20).mean()
+            # Momentum Calculation (Slope of Log Prices)
+            y = np.log(s['Close'].values)
+            x = np.arange(len(y))
+            slope, _ = np.polyfit(x, y, 1)
             
-            # Simple Filter: Ignore penny stocks under ₹10 to keep the data high-quality
-            if price < 10: continue
-
-            results.append({
+            # RVOL
+            rvol = s['Volume'].iloc[-1] / s['Volume'].tail(20).mean()
+            
+            final_data.append({
                 "Ticker": t.replace(".NS", ""),
-                "Price": round(float(price), 2),
+                "Price": round(float(s['Close'].iloc[-1]), 2),
                 "Slope": round(float(slope), 6),
                 "RVOL": round(float(rvol), 2)
             })
-        except:
-            continue
+        except: continue
     
-    df = pd.DataFrame(results)
-    df.to_csv("daily_watchlist.csv", index=False)
-    print(f"🔥 Successfully scanned {len(df)} stocks. Watchlist updated.")
+    output_df = pd.DataFrame(final_data)
+    if not output_df.empty:
+        output_df.to_csv("daily_watchlist.csv", index=False)
+        print(f"🚀 DONE: daily_watchlist.csv generated with {len(output_df)} stocks.")
+    else:
+        print("❌ FAILED: No data collected.")
 
 if __name__ == "__main__":
     generate()
