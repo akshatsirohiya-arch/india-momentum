@@ -1,33 +1,27 @@
 name: Full India Market Scan
 on:
   schedule:
-    - cron: '30 13 * * *'
+    - cron: '0 13 * * *' # 6:30 PM IST
   workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Explicitly grant write access
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      contents: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
+      - uses: actions/checkout@v4
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: Run Scanner
+      - name: Scan
         run: |
           pip install yfinance pandas numpy requests
           python generate_watchlist.py
-
-      - name: Commit and Push
+      - name: Push
         run: |
           git config --global user.name "MarketBot"
           git config --global user.email "bot@nse.com"
           git add daily_watchlist.csv
-          git commit -m "Update NSE Watchlist $(date)" || echo "No changes"
+          git commit -m "Full Market Scan $(date)" || exit 0
           git push
