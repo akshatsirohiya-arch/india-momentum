@@ -2,62 +2,73 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
+import time
 
-def get_all_tickers():
-    """Fetches 500+ liquid tickers from a reliable GitHub mirror to avoid NSE blocks."""
+def get_tickers():
+    """Fetches Nifty 500 to ensure we have a liquid, scan-able universe."""
     url = "https://raw.githubusercontent.com/stock-data/india-tickers/master/nifty500.json"
     try:
-        data = requests.get(url).json()
-        return [f"{t}.NS" for t in data]
+        return [f"{t}.NS" for t in requests.get(url).json()]
     except:
-        # Emergency backup list if the mirror is down
-        return ["RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS", "SBIN.NS"]
+        return ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS"]
 
-def is_clean_trend(s):
-    """Filters for stocks making Higher Highs and Higher Lows over last 20 days."""
-    recent = s.tail(20)
-    hh = recent['High'].iloc[-1] > recent['High'].iloc[-10]
-    hl = recent['Low'].iloc[-1] > recent['Low'].iloc[-10]
-    return hh and hl
+def check_structure(df):
+    """
+    Strict Higher High / Higher Low Logic:
+    1. Current Price > 20-day SMA
+    2. Higher High: Max of last 5 days > Max of previous 5-10 days
+    3. Higher Low: Min of last 5 days > Min of previous 5-10 days
+    """
+    if len(df) < 40: return False
+    
+    recent_high = df['High'].tail(5).max()
+    prev_high = df['High'].iloc[-10:-5].max()
+    
+    recent_low = df['Low'].tail(5).min()
+    prev_low = df['Low'].iloc[-10:-5].min()
+    
+    sma20 = df['Close'].rolling(20).mean().iloc[-1]
+    current_price = df['Close'].iloc[-1]
+    
+    return (recent_high > prev_high) and (recent_low > prev_low) and (current_price > sma20)
 
 def generate():
-    tickers = get_all_tickers()
-    print(f"Scanning {len(tickers)} stocks for Clean Momentum...")
+    tickers = get_tickers()
+    print(f"Scanning {len(tickers)} stocks for Clean Breakouts...")
     
-    # Vectorized Download (Fastest way to hit the whole market)
-    data = yf.download(tickers, period="100d", interval="1d", group_by='ticker', progress=False)
+    # Process in smaller batches to avoid SSL 'Bad Record Mac' errors
+    batch_size = 50
+    all_results = []
     
-    results = []
-    for t in tickers:
+    for i in range(0, len(tickers), batch_size):
+        batch = tickers[i:i+batch_size]
         try:
-            s = data[t].dropna()
-            if len(s) < 50: continue
+            data = yf.download(batch, period="100d", interval="1d", group_by='ticker', progress=False)
             
-            # 1. Slope Calculation (Institutional Momentum)
-            y = np.log(s['Close'].values)
-            x = np.arange(len(y))
-            slope, _ = np.polyfit(x, y, 1)
-            
-            # 2. Clean Trend Filter (HH/HL)
-            if not is_clean_trend(s): continue
-            
-            price = s['Close'].iloc[-1]
-            if price < 20: continue # Ignore junk penny stocks
-
-            results.append({
-                "Ticker": t.replace(".NS", ""),
-                "Price": round(float(price), 2),
-                "Slope": round(float(slope), 6),
-                "RVOL": round(float(s['Volume'].iloc[-1] / s['Volume'].tail(20).mean()), 2)
-            })
+            for t in batch:
+                try:
+                    s = data[t].dropna()
+                    if not check_structure(s): continue
+                    
+                    # Log-linear slope for smooth institutional trend
+                    y = np.log(s['Close'].values)
+                    x = np.arange(len(y))
+                    slope, _ = np.polyfit(x, y, 1)
+                    
+                    if slope > 0.001: # Only positive momentum
+                        all_results.append({
+                            "Ticker": t.replace(".NS", ""),
+                            "Price": round(float(s['Close'].iloc[-1]), 2),
+                            "Slope": round(float(slope), 6),
+                            "RVOL": round(float(s['Volume'].iloc[-1] / s['Volume'].tail(20).mean()), 2)
+                        })
+                except: continue
+            time.sleep(1) # Small pause to prevent rate-limiting
         except: continue
-    
-    df = pd.DataFrame(results)
-    if not df.empty:
-        df.to_csv("daily_watchlist.csv", index=False)
-        print(f"✅ Success! {len(df)} High-Momentum stocks found.")
-    else:
-        print("❌ No stocks met the HH/HL criteria today.")
+
+    df = pd.DataFrame(all_results)
+    df.to_csv("daily_watchlist.csv", index=False)
+    print(f"✅ Success: {len(df)} stocks found with clean momentum structures.")
 
 if __name__ == "__main__":
     generate()
