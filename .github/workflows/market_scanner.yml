@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # This line tells GitHub to use Node 24 for the actions below
+    # Add this environment variable to tell GitHub you're ready for Node 24
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true 
     steps:
@@ -29,6 +29,6 @@ jobs:
           git config --global user.name "MarketBot"
           git config --global user.email "bot@nse.com"
           git add daily_watchlist.csv
-          # The '|| echo' prevents the action from failing if the CSV didn't change
-          git commit -m "Full NSE Update" || echo "No changes to commit"
+          # The '|| echo' allows the action to finish even if no stocks changed price
+          git commit -m "Full NSE Update $(date)" || echo "No changes to commit"
           git push
